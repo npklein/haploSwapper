@@ -64,15 +64,16 @@ for haplotype_count_file in glob.glob(args.haplotypeCountsDir+'/*'):
                     line[12] = '0|1'
                 else:
                     raise RuntimeError('Thought only het sites in this file')
-                outfile = haplotype_count_file.split('/')[-1].replace('.txt','.switched.txt')
-                if outfile not in switch_haplotypes:
-                    switch_haplotypes[outfile] = []
-                switch_haplotypes[outfile].append('\t'.join(line)+'\n')
+            outfile = haplotype_count_file.split('/')[-1].replace('.txt','.switched.txt')
+            if outfile not in switch_geneAE:
+                switch_geneAE[outfile] = []
+            switch_haplotypes[outfile].append('\t'.join(line)+'\n')
 
-for file in switch_haplotypes:
+
+for file in switch_geneAE:
     with open(args.out_dir+'/'+file,'w') as out:
        out.write(header)
-       for line in switch_haplotypes[file]:
+       for line in switch_geneAE[file]:
            out.write(line)
 
 #    print('written to '+args.out_dir+'/'+haplotype_count_file.replace('.txt','.switched.txt'))

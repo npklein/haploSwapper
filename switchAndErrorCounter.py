@@ -50,7 +50,7 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
     sample_to_use(str): If not None, use this sample. Otherwise, use first sample (chunkVCF from phASER should only have one)
     '''
     vcf_reader = vcf.Reader(filename=vcf_file)
-    records = vcf_reader.fetch('22',start,stop)
+    records = vcf_reader.fetch(chr,start,stop)
     # use ordered dict so that later when taking .values() they are in the same order, can use index for xomparing
     haplotypeA = {}
     haplotypeB = {}
@@ -58,10 +58,15 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
     samples = set([])
     start = None
     recordInfo = {}
+    end = None
+    sample = None
+    x = 0
     for record in records:
         # saving start and end so that for the ref VCF tabix indexing can be used to grab the same chunk as for the chunk VCF
         if not start:
             start = record.POS
+        if record.POS == '23055538':
+            print(record.POS)
         end = record.POS
         ref = str(record.REF[0])
         alt = str(record.ALT[0])
@@ -105,8 +110,26 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
 flush_print('start looking for directory called vcf_per_sample')
 found_dir = False
 out =  open(args.out_file,'w')
-out.write('chunk\tsample\tswitch\tno switch\tswitchSnps\tnoSwitchSnps\ttotalHets\tchunkVCF hom alt - refVCF hom ref\tchunkVCF hom ref - refVCF hom alt\tchunkVCF hom - refVCF het\tchunkVCF het - refCF hom\ttotalError\thaploSize\n')
+out.write('chunk'+'\t')
+out.write('sample'+'\t')
+out.write('switch'+'\t') 
+out.write('no switch'+'\t') 
+out.write('switchSnps'+'\t')
+out.write('noSwitchSnps'+'\t')
+out.write('totalHetsChunk'+'\t')
+out.write('totalHetsRef'+'\t')
+out.write('chunkVCF hom alt TO refVCF hom ref'+'\t')
+out.write('chunkVCF hom ref - refVCF hom alt'+'\t')
+out.write('chunkVCF hom - refVCF het'+'\t')
+out.write('chunkVCF het - refVCF hom'+'\t')
+out.write('chunkVCF hom alt TO refVCF hom ref SNPs'+'\t')
+out.write('chunkVCF hom ref - refVCF hom alt SNPs'+'\t')
+out.write('chunkVCF hom - refVCF het SNPs'+'\t')
+out.write('chunkVCF het - refVCF hom SNPs'+'\t')
+out.write('totalError'+'\t')
+out.write('haploSize\n')
 
+sample_snp_errors = {}
 # walk through all <CHUNK> dirs and get the VCF files
 for root, dirs, files in os.walk(args.chunkDir):
     # add / because also have vcf_per_sample_<some other name>, this way can split on /
@@ -127,7 +150,7 @@ for root, dirs, files in os.walk(args.chunkDir):
                                     'chunkVCF hom alt - refVCF_hom_ref':0,  # AA TT
                                     'chunkVCF hom ref - refVCF hom alt':0,  # TT AA
                                     'chunkVCF hom - refVCF het':0,          # AA AT or AA TA or TT AT or TT AT
-                                    'chunkVCF het - refCF hom':0}           # AT AA or TA AA or TA TT or AT TT
+                                    'chunkVCF het - refVCF hom':0}           # AT AA or TA AA or TA TT or AT TT
             total_count = 0
             
             # this is specific for the filename
@@ -139,6 +162,9 @@ for root, dirs, files in os.walk(args.chunkDir):
             if args.debug:
                 flush_print('starting phaser vcf')
             haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, end_chunkVCF, sample, recordInfoChunk  = construct_haplotype(os.path.join(root, file), args.chr, silent=True)
+            if not end_chunkVCF:
+                flush_print('no records in chunk')
+                continue
             if sample != file_sample_name:
                 raise RuntimeError('Returned results from wrong sample, should have been '+file_sample_name+', was '+sample)
             if args.debug:
@@ -148,6 +174,14 @@ for root, dirs, files in os.walk(args.chunkDir):
             haplotypeA_refVCF, haplotypeB_refVCF, genotypes_refVCF, start_refVCF, end_refVCF, sample, recordInfoRef = construct_haplotype(os.path.join(root, args.vcfReference),
                                                                                                                             args.chr, start=start_chunkVCF-1, stop=end_chunkVCF,
                                                                                                                             sample_to_use = sample_link[sample], silent = False)
+            sample_snp_errors[sample] = {'switch_snp':[],'no_switch_snp':[],
+                                         'chunkVCF_homAlt__refVCF_homRef':[],
+                                         'chunkVCF_homRef__refVCF_homAlt':[],
+                                         'chunkVCF_hom__refVCF_het':[],
+                                         'chunkVCF_het__refVCF_hom':[]}
+            if not end_refVCF:
+                flush_print('no records in '+args.chr+':'+str(start_chunkVCF-1)+'-'+str(end_chunkVCF))
+                continue
             if args.debug:
                 flush_print('chunkVCF: '+str(start_chunkVCF)+'-'+str(end_chunkVCF))
                 flush_print('refVCF:   '+str(start_refVCF)+'-'+str(end_refVCF))
@@ -160,50 +194,100 @@ for root, dirs, files in os.walk(args.chunkDir):
             overlapping_snp_positions = keys_a & keys_b # '&' operator is used for set intersection
             switch_snps = []
             no_switch_snps = []
-            totalHets = 0
+            chunkVCF_homAlt__refVCF_homRef = []
+            chunkVCF_homRef__refVCF_homAlt = []
+            chunkVCF_hom__refVCF_het = []
+            chunkVCF_het__refVCF_hom = []
+            totalHetsChunk = 0
+            totalHetsRef = 0
 #            flush_print(str(len(overlapping_snp_positions))+' overlapping SNP positions')
             for snp in overlapping_snp_positions:
+                snp_name = args.chr+'_'+str(snp)+'_'+str(recordInfoChunk[snp])
                 genotypeCall_chunkVCF = genotypes_chunkVCF[snp]
                 genotypeCall_refVCF = genotypes_refVCF[snp]
                 genotype_refVCF = haplotypeA_refVCF[snp]+haplotypeB_refVCF[snp]
+                if len(genotype_refVCF) > 2:
+                    flush_print('Deletion or insertion? refVCF = '+genotype_refVCF)
+                    continue
                 genotype_chunkVCF = haplotypeA_chunkVCF[snp]+haplotypeB_chunkVCF[snp]
+                # First check if genotype of chunk VCF is not same as ref VCF (or switched, so not (1|1 and 1|1), (0|0 and 0|0),
+                # (0|1 and 0|1) or (1|0 and 0|1)
                 if genotype_chunkVCF != genotype_refVCF and genotype_chunkVCF[1]+genotype_chunkVCF[0] != genotype_refVCF:
+                    # genotype error hom ref -> hom alt
                     if genotypeCall_chunkVCF['GT'] == '1|1' and genotypeCall_refVCF['GT'] == '0|0':
                         genotype_error_count['chunkVCF hom alt - refVCF_hom_ref'] += 1
+                        chunkVCF_homAlt__refVCF_homRef.append(snp_name)
+                        sample_snp_errors[sample]['chunkVCF_homAlt__refVCF_homRef'].append(snp_name)
+                    # genotype error hom alt -> hom ref
                     elif genotypeCall_chunkVCF['GT'] == '0|0' and genotypeCall_refVCF['GT'] == '1|1':
                         genotype_error_count['chunkVCF hom ref - refVCF hom alt'] += 1
+                        chunkVCF_homRef__refVCF_homAlt.append(snp_name)
+                        sample_snp_errors[sample]['chunkVCF_homRef__refVCF_homAlt'].append(snp_name)
+                    # genotype error het -> hom
                     elif (genotypeCall_chunkVCF['GT'] == '1|1' or genotypeCall_chunkVCF['GT'] == '0|0'
                          ) and (genotypeCall_refVCF['GT'] == '0|1' or genotypeCall_refVCF['GT'] == '1|0'):
                         genotype_error_count['chunkVCF hom - refVCF het'] += 1
+                        chunkVCF_hom__refVCF_het.append(snp_name)
+                        totalHetsRef += 1
+                        sample_snp_errors[sample]['chunkVCF_hom__refVCF_het'].append(snp_name)
+                    # genotype error hom -> het
                     elif (genotypeCall_refVCF['GT'] == '1|1' or genotypeCall_refVCF['GT'] == '0|0'
                          ) and (genotypeCall_chunkVCF['GT'] == '0|1' or genotypeCall_chunkVCF['GT'] == '1|0'):
-                        genotype_error_count['chunkVCF het - refCF hom'] += 1
-                        totalHets += 1
+                        genotype_error_count['chunkVCF het - refVCF hom'] += 1
+                        chunkVCF_het__refVCF_hom.append(snp_name)
+                        totalHetsChunk += 1
+                        sample_snp_errors[sample]['chunkVCF_het__refVCF_hom'].append(snp_name)
                     else:
                         message = 'Combinations of genotypes that I did not account for:\n'
-                        message += 'chunk: '+genotypeCall_chunkVCF['GT']
+                        message += genotype_chunkVCF + '!=' +genotype_refVCF+' and '+genotype_chunkVCF[1]+genotype_chunkVCF[0] + '!=' + genotype_refVCF 
+                        message += 'chunk: '+genotypeCall_chunkVCF['GT']+'\n'
                         message += 'ref: '+genotypeCall_refVCF['GT']
                         raise RuntimeError(message)
                     genotype_error_count['total'] += 1
+                # know they are the same, now check if they are hets
                 elif genotypeCall_chunkVCF['GT'] == '1|0' or genotypeCall_chunkVCF['GT'] == '0|1':
-                    totalHets += 1
-                    snp_name = args.chr+'_'+str(snp)+'_'+str(recordInfoChunk[snp])
+                    totalHetsChunk += 1
+                    totalHetsRef += 1
+                    # if they are not the same but are both het, they must be swapped
                     if genotype_chunkVCF != genotype_refVCF:
                         switch_snps.append(snp_name)
                         switch_count += 1
+                        sample_snp_errors[sample]['switch_snp'].append(snp_name)
                     else:
                         no_switch_snps.append(snp_name)
                         not_switch_count += 1
+                        sample_snp_errors[sample]['no_switch_snp'].append(snp_name)
+                # if it is not one of the first then they are both hom ref or both hom alt
                 total_count += 1
-            out.write(chunk+'\t'+file_sample_name+'\t'+str(switch_count)+'\t'+str(not_switch_count)+'\t'+','.join(switch_snps)+'\t'+','.join(no_switch_snps)+'\t'+
-                      str(totalHets)+'\t'+
+            out.write(chunk+'\t'+'chr'+args.chr+'.'+file_sample_name+'\t'+str(switch_count)+'\t'+str(not_switch_count)+'\t'+','.join(switch_snps)+'\t'+','.join(no_switch_snps)+'\t'+
+                      str(totalHetsChunk)+'\t'+str(totalHetsRef)+'\t'+
                       str(genotype_error_count['chunkVCF hom alt - refVCF_hom_ref'])+'\t'+str(genotype_error_count['chunkVCF hom ref - refVCF hom alt'])+'\t'+
-                      str( genotype_error_count['chunkVCF hom - refVCF het'])+'\t'+str(genotype_error_count['chunkVCF het - refCF hom'])+'\t'+
-                      str(genotype_error_count['total'])+'\t'+str(total_count)+'\n')
+                      str( genotype_error_count['chunkVCF hom - refVCF het'])+'\t'+str(genotype_error_count['chunkVCF het - refVCF hom'])+'\t'+
+                      ','.join(chunkVCF_homAlt__refVCF_homRef)+'\t'+','.join(chunkVCF_homRef__refVCF_homAlt)+'\t'+','.join(chunkVCF_hom__refVCF_het)+
+                       '\t'+','.join(chunkVCF_het__refVCF_hom)+'\t'+str(genotype_error_count['total'])+'\t'+str(total_count)+'\n')
 
 
 out.close()
 print('written to '+args.out_file)
 
+snp_per_sample_file = args.out_file.replace('.txt','snpErrorPerSample.txt')
+with open(snp_per_sample_file,'w') as out:
+    out.write('sample_name\tswitch_snps\tno_switch_snps\t')
+    out.write('chunkVCF homAlt to refVCF homRef\t')
+    out.write('chunkVCF homRef to refVCF homAlt\t')
+    out.write('chunkVCF hom to refVCF het\t')
+    out.write('chunkVCF het to refVCF hom')
+    for sample in sample_snp_errors:
+        out.write('\n'+sample+'\t')
+        d = sample_snp_errors[sample]
+        out.write(','.join(d['switch_snp'])+'\t')
+        out.write(','.join(d['no_switch_snp'])+'\t')
+        out.write(','.join(d['chunkVCF_homAlt__refVCF_homRef'])+'\t')
+        out.write(','.join(d['chunkVCF_homRef__refVCF_homAlt'])+'\t')
+        out.write(','.join(d['chunkVCF_hom__refVCF_het'])+'\t')
+        out.write(','.join(d['chunkVCF_het__refVCF_hom']))
+print('written to '+snp_per_sample_file)
+
+
 if not found_dir:
-    flush_print('vcf_per_sample dir not found in input directory tree')
+    raise RuntimeError('vcf_per_sample dir not found in input directory tree')
