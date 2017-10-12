@@ -20,9 +20,15 @@ flush_print('switchErrorDir: '+args.switchErrorDir)
 flush_print('geneAeCountsDir: '+args.geneAeCountsDir)
 flush_print('out_dir: '+args.out_dir)
 
+def header_index(header):
+    head_index = {}
+    for index, c in enumerate(header):
+        header_index[c] = index
+    return header_index
 
-#chunk    sample    switch    no switch    chunkVCF hom alt - refVCF hom ref    chunkVCF hom ref - refVCF hom alt    chunkVCF hom - refVCF het    chunkVCF het - refCF hom
-# 18535735.18703682    BC48DMACXX-1-9    0    0    0    0    0    1    1
+#chunk   sample  overlapping_snps        snps_only_chunkVCF      snps_only_refVCF        switch  no switch       switchSnps      noSwitchSnps    totalHetsChunk  totalHetsRef    chunkVCF hom alt TO refVCF hom ref      
+# chunkVCF hom ref - refVCF hom alt       chunkVCF hom - refVCF het       chunkVCF het - refVCF hom       chunkVCF het - refVCF het       chunkVCF hom alt TO refVCF hom ref SNPs chunkVCF hom ref - refVCF hom alt SNPs  
+# chunkVCF hom - refVCF het SNPs  chunkVCF het - refVCF hom SNPs  chunkVCF het - refVCF het SNPs  totalError      haploSize
 switches = {}
 flush_print('counting switches')
 for switch_error_file in glob.glob(args.switchErrorDir+'/*.txt'):
@@ -32,12 +38,11 @@ for switch_error_file in glob.glob(args.switchErrorDir+'/*.txt'):
         input_file.readline()
         for line in input_file:
             line = line.strip().split('\t')
-            chunk = line[1].split('.')[0]+'.'+line[0]
-            sample = line[1].split('.')[1]
-            switch = int(line[2])
-            no_switch = int(line[3])
-            switch_snp = set(line[4].split(','))
-            no_switch_snp = set(line[5].split(','))
+            sample = line[header_index['sample']]
+            switch = int(line[header_index['switch']])
+            no_switch = int(line[header_index['no switch']])
+            switch_snp = set(line[header_index['switchSnps']].split(','))
+            no_switch_snp = set(line[header_index['noSwitchSnps']].split(','))
             switches[sample] = {'switch':switch, 'no_switch':no_switch,
                                 'switch_snp':switch_snp,'no_switch_snp':no_switch_snp}
 flush_print('samples: '+str(len(switches.keys())))
