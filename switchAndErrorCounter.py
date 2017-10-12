@@ -34,7 +34,7 @@ with open(args.linking_file) as input_file:
 with open(args.samples_file) as input_file:
     samples_to_include = set(input_file.read().split('\n'))
 
-def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = None, silent = True):
+def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = None, silent = True, filter_pass_only = True):
     '''Construct haplotype from vcf_file chr:start-stop
     
     vcf_file (str): Loctation of VCF file
@@ -48,6 +48,7 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
     start(int): Start position of input VCF
     end(int): End position of input VCF
     sample_to_use(str): If not None, use this sample. Otherwise, use first sample (chunkVCF from phASER should only have one)
+    filter_pass_only(bool): If true, filter out SNPs that do not have PASS in FILTER columns (def: True)
     '''
     vcf_reader = vcf.Reader(filename=vcf_file)
     records = vcf_reader.fetch(chr,start,stop)
@@ -65,8 +66,10 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
         # saving start and end so that for the ref VCF tabix indexing can be used to grab the same chunk as for the chunk VCF
         if not start:
             start = record.POS
-        if record.POS == '23055538':
-            print(record.POS)
+        # if filter = PASS: record.FILTER = [], otherwise e.g. record.FILTER = ['INACCESSIBLE']
+        # so continue if record.FILTER contains value
+        if filter_pass_only and record.FILTER:
+            continue
         end = record.POS
         ref = str(record.REF[0])
         alt = str(record.ALT[0])
@@ -112,6 +115,9 @@ found_dir = False
 out =  open(args.out_file,'w')
 out.write('chunk'+'\t')
 out.write('sample'+'\t')
+out.write('overlapping_snps'+'\t')
+out.write('snps_only_chunkVCF'+'\t')
+out.write('snps_only_refVCF'+'\t')
 out.write('switch'+'\t') 
 out.write('no switch'+'\t') 
 out.write('switchSnps'+'\t')
@@ -122,10 +128,12 @@ out.write('chunkVCF hom alt TO refVCF hom ref'+'\t')
 out.write('chunkVCF hom ref - refVCF hom alt'+'\t')
 out.write('chunkVCF hom - refVCF het'+'\t')
 out.write('chunkVCF het - refVCF hom'+'\t')
+out.write('chunkVCF het - refVCF het'+'\t')
 out.write('chunkVCF hom alt TO refVCF hom ref SNPs'+'\t')
 out.write('chunkVCF hom ref - refVCF hom alt SNPs'+'\t')
 out.write('chunkVCF hom - refVCF het SNPs'+'\t')
 out.write('chunkVCF het - refVCF hom SNPs'+'\t')
+out.write('chunkVCF het - refVCF het SNPs'+'\t')
 out.write('totalError'+'\t')
 out.write('haploSize\n')
 
@@ -147,12 +155,12 @@ for root, dirs, files in os.walk(args.chunkDir):
             switch_count = 0
             not_switch_count = 0
             genotype_error_count = {'total':0,
-                                    'chunkVCF hom alt - refVCF_hom_ref':0,  # AA TT
+                                    'chunkVCF hom alt - refVCF hom ref':0,  # AA TT
                                     'chunkVCF hom ref - refVCF hom alt':0,  # TT AA
                                     'chunkVCF hom - refVCF het':0,          # AA AT or AA TA or TT AT or TT AT
-                                    'chunkVCF het - refVCF hom':0}           # AT AA or TA AA or TA TT or AT TT
+                                    'chunkVCF het - refVCF hom':0,          # AT AA or TA AA or TA TT or AT TT
+                                    'chunkVCF het - refVCF het':0}           # AT CG (both het both different)
             total_count = 0
-            
             # this is specific for the filename
             file_sample_name = file.split('phASER.')[1].split('.chr')[0]
             if not file_sample_name in samples_to_include:
@@ -178,7 +186,8 @@ for root, dirs, files in os.walk(args.chunkDir):
                                          'chunkVCF_homAlt__refVCF_homRef':[],
                                          'chunkVCF_homRef__refVCF_homAlt':[],
                                          'chunkVCF_hom__refVCF_het':[],
-                                         'chunkVCF_het__refVCF_hom':[]}
+                                         'chunkVCF_het__refVCF_hom':[],
+                                         'chunkVCF_het__refVCF_het':[]}
             if not end_refVCF:
                 flush_print('no records in '+args.chr+':'+str(start_chunkVCF-1)+'-'+str(end_chunkVCF))
                 continue
@@ -188,18 +197,38 @@ for root, dirs, files in os.walk(args.chunkDir):
             # sanity check, shouldnt happen
             if start_refVCF < start_chunkVCF or end_refVCF > end_chunkVCF:
                 raise RuntimeError('start of refVCF lower than start of chunkVCF or end of refVCF higher than end of chunkVCF,, something wrong with SNP indexing')
-            keys_a = set(haplotypeA_chunkVCF.keys())
-            keys_b = set(haplotypeA_refVCF.keys())
+            snps_a = set(haplotypeA_chunkVCF.keys())
+            snps_b = set(haplotypeA_refVCF.keys())
             # only get those SNPs that have been genotypes in both the chunk VCF and the ref VCF
-            overlapping_snp_positions = keys_a & keys_b # '&' operator is used for set intersection
+            overlapping_snp_positions = snps_a & snps_b # '&' operator is used for set intersection
+            snps_only_chunkVCF = snps_a - snps_b
+            snps_only_refVCF = snps_b - snps_a
+
             switch_snps = []
             no_switch_snps = []
             chunkVCF_homAlt__refVCF_homRef = []
             chunkVCF_homRef__refVCF_homAlt = []
             chunkVCF_hom__refVCF_het = []
             chunkVCF_het__refVCF_hom = []
+            chunkVCF_het__refVCF_het = []
             totalHetsChunk = 0
             totalHetsRef = 0
+            
+            snps_only_chunkVCF_names = []
+            snps_only_refVCF_names = []
+            # loop through SNPs that are not called in refVCF and check if they are het in chunkVCF. If so, add them for the ouput file
+            for snp in snps_only_chunkVCF:
+                genotypeCall_chunkVCF = genotypes_chunkVCF[snp]
+                if genotypeCall_chunkVCF['GT'] == '0|1' or genotypeCall_chunkVCF['GT'] == '1|0':
+                    snps_only_chunkVCF_names.append(args.chr+'_'+str(snp)+'_'+str(recordInfoChunk[snp]))
+            for snp in snps_only_refVCF:
+                genotypeCall_refVCF = genotypes_refVCF[snp]
+                if genotypeCall_refVCF['GT'] == '0|1' or genotypeCall_refVCF['GT'] == '1|0':
+                    snps_only_refVCF_names.append(args.chr+'_'+str(snp)+'_'+str(recordInfoRef[snp]))
+                    
+            # the snp keys are the numeric positions, need to change to snp name for later comparison
+            overlapping_snp_positions_names = []
+
 #            flush_print(str(len(overlapping_snp_positions))+' overlapping SNP positions')
             for snp in overlapping_snp_positions:
                 snp_name = args.chr+'_'+str(snp)+'_'+str(recordInfoChunk[snp])
@@ -215,7 +244,7 @@ for root, dirs, files in os.walk(args.chunkDir):
                 if genotype_chunkVCF != genotype_refVCF and genotype_chunkVCF[1]+genotype_chunkVCF[0] != genotype_refVCF:
                     # genotype error hom ref -> hom alt
                     if genotypeCall_chunkVCF['GT'] == '1|1' and genotypeCall_refVCF['GT'] == '0|0':
-                        genotype_error_count['chunkVCF hom alt - refVCF_hom_ref'] += 1
+                        genotype_error_count['chunkVCF hom alt - refVCF hom ref'] += 1
                         chunkVCF_homAlt__refVCF_homRef.append(snp_name)
                         sample_snp_errors[sample]['chunkVCF_homAlt__refVCF_homRef'].append(snp_name)
                     # genotype error hom alt -> hom ref
@@ -237,9 +266,17 @@ for root, dirs, files in os.walk(args.chunkDir):
                         chunkVCF_het__refVCF_hom.append(snp_name)
                         totalHetsChunk += 1
                         sample_snp_errors[sample]['chunkVCF_het__refVCF_hom'].append(snp_name)
+                    # genotype het complete different (e.g. chunkVCF AT, refVCF GC)
+                    elif (genotypeCall_refVCF['GT'] == '1|0' or genotypeCall_refVCF['GT'] == '0|1'
+                            ) and (genotypeCall_chunkVCF['GT'] == '1|0' or genotypeCall_chunkVCF['GT'] == '0|1'):
+                        genotype_error_count['chunkVCF_het__refVCF_het'] += 1
+                        chunkVCF_het__refVCF_het.append(snp_name)
+                        sample_snp_errors[sample]['chunkVCF_het__refVCF_het'].append(snp_name)
+                        totalHetsChunk += 1
+                        overlapping_snp_positions_names.append(args.chr+'_'+str(snp)+'_'+str(recordInfoRef[snp]))
                     else:
                         message = 'Combinations of genotypes that I did not account for:\n'
-                        message += genotype_chunkVCF + '!=' +genotype_refVCF+' and '+genotype_chunkVCF[1]+genotype_chunkVCF[0] + '!=' + genotype_refVCF 
+                        message += genotype_chunkVCF + '!=' +genotype_refVCF+' and '+genotype_chunkVCF[1]+genotype_chunkVCF[0] + '!=' + genotype_refVCF +'\n'
                         message += 'chunk: '+genotypeCall_chunkVCF['GT']+'\n'
                         message += 'ref: '+genotypeCall_refVCF['GT']
                         raise RuntimeError(message)
@@ -253,18 +290,25 @@ for root, dirs, files in os.walk(args.chunkDir):
                         switch_snps.append(snp_name)
                         switch_count += 1
                         sample_snp_errors[sample]['switch_snp'].append(snp_name)
+                        overlapping_snp_positions_names.append(args.chr+'_'+str(snp)+'_'+str(recordInfoRef[snp]))
                     else:
                         no_switch_snps.append(snp_name)
                         not_switch_count += 1
                         sample_snp_errors[sample]['no_switch_snp'].append(snp_name)
+                        overlapping_snp_positions_names.append(args.chr+'_'+str(snp)+'_'+str(recordInfoRef[snp]))
+
                 # if it is not one of the first then they are both hom ref or both hom alt
                 total_count += 1
-            out.write(chunk+'\t'+'chr'+args.chr+'.'+file_sample_name+'\t'+str(switch_count)+'\t'+str(not_switch_count)+'\t'+','.join(switch_snps)+'\t'+','.join(no_switch_snps)+'\t'+
-                      str(totalHetsChunk)+'\t'+str(totalHetsRef)+'\t'+
-                      str(genotype_error_count['chunkVCF hom alt - refVCF_hom_ref'])+'\t'+str(genotype_error_count['chunkVCF hom ref - refVCF hom alt'])+'\t'+
+            out.write(chunk+'\t'+'chr'+args.chr+'.'+file_sample_name+'\t'+','.join(overlapping_snp_positions_names)+'\t'+','.join(snps_only_chunkVCF_names)+
+                      '\t'+','.join(snps_only_refVCF_names)+'\t'+
+                        str(switch_count)+'\t'+str(not_switch_count)+'\t'+
+                      ','.join(switch_snps)+'\t'+','.join(no_switch_snps)+'\t'+str(totalHetsChunk)+'\t'+str(totalHetsRef)+'\t'+
+                      str(genotype_error_count['chunkVCF hom alt - refVCF hom ref'])+'\t'+str(genotype_error_count['chunkVCF hom ref - refVCF hom alt'])+'\t'+
                       str( genotype_error_count['chunkVCF hom - refVCF het'])+'\t'+str(genotype_error_count['chunkVCF het - refVCF hom'])+'\t'+
+                      str(genotype_error_count['chunkVCF het - refVCF het'])+'\t'+
                       ','.join(chunkVCF_homAlt__refVCF_homRef)+'\t'+','.join(chunkVCF_homRef__refVCF_homAlt)+'\t'+','.join(chunkVCF_hom__refVCF_het)+
-                       '\t'+','.join(chunkVCF_het__refVCF_hom)+'\t'+str(genotype_error_count['total'])+'\t'+str(total_count)+'\n')
+                      '\t'+','.join(chunkVCF_het__refVCF_hom)+'\t'+','.join(chunkVCF_het__refVCF_het)+
+                      '\t'+str(genotype_error_count['total'])+'\t'+str(total_count)+'\n')
 
 
 out.close()
@@ -276,7 +320,8 @@ with open(snp_per_sample_file,'w') as out:
     out.write('chunkVCF homAlt to refVCF homRef\t')
     out.write('chunkVCF homRef to refVCF homAlt\t')
     out.write('chunkVCF hom to refVCF het\t')
-    out.write('chunkVCF het to refVCF hom')
+    out.write('chunkVCF het to refVCF hom\t')
+    out.write('chunkVCF het to refVCF het')
     for sample in sample_snp_errors:
         out.write('\n'+sample+'\t')
         d = sample_snp_errors[sample]
@@ -285,7 +330,8 @@ with open(snp_per_sample_file,'w') as out:
         out.write(','.join(d['chunkVCF_homAlt__refVCF_homRef'])+'\t')
         out.write(','.join(d['chunkVCF_homRef__refVCF_homAlt'])+'\t')
         out.write(','.join(d['chunkVCF_hom__refVCF_het'])+'\t')
-        out.write(','.join(d['chunkVCF_het__refVCF_hom']))
+        out.write(','.join(d['chunkVCF_het__refVCF_hom'])+'\t')
+        out.write(','.join(d['chunkVCF_het__refVCF_het']))
 print('written to '+snp_per_sample_file)
 
 
