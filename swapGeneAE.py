@@ -31,7 +31,9 @@ def header_index(header):
 # chunkVCF hom - refVCF het SNPs  chunkVCF het - refVCF hom SNPs  chunkVCF het - refVCF het SNPs  totalError      haploSize
 switches = {}
 flush_print('counting switches')
-for switch_error_file in glob.glob(args.switchErrorDir+'/*switchAndError.txt'):
+switchErrorFiles = glob.glob(args.switchErrorDir+'/*switchAndError.txt')
+flush_print(str(len(switchErrorFiles))+ ' switch error files in '+args.switchErrorDir+'/*switchAndError.txt')
+for switch_error_file in switchErrorFiles:
     if args.chunk not in switch_error_file:
         continue
     with open(switch_error_file) as input_file:
@@ -39,7 +41,7 @@ for switch_error_file in glob.glob(args.switchErrorDir+'/*switchAndError.txt'):
 
         for line in input_file:
             line = line.strip().split('\t')
-            sample = line[head_index['sample']]
+            sample = line[head_index['sample']].split('.')[1]
             switch = int(line[head_index['switch']])
             no_switch = int(line[head_index['no switch']])
             switch_snp = set(line[head_index['switchSnps']].split(','))
