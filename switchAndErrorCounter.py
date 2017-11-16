@@ -63,9 +63,6 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
     sample = None
     x = 0
     for record in records:
-        # saving start and end so that for the ref VCF tabix indexing can be used to grab the same chunk as for the chunk VCF
-        if not start:
-            start = record.POS
         # if filter = PASS: record.FILTER = [], otherwise e.g. record.FILTER = ['INACCESSIBLE']
         # so continue if record.FILTER contains value
         if filter_pass_only and record.FILTER:
@@ -77,6 +74,10 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
            if args.debug:
               flush_print('Skipping '+str(record.CHROM)+':'+str(record.POS)+' because it is not a bi-allelic SNP')
               continue
+        # saving start and end so that for the ref VCF tabix indexing can be used to grab the same chunk as for the chunk VCF
+        if x == 0:
+            start = record.POS
+        x+=1
         recordInfo[record.POS] = ref+'_'+alt
         for call in record.samples:
             sample = call.sample
@@ -197,6 +198,8 @@ for root, dirs, files in os.walk(args.chunkDir):
             if args.debug:
                 flush_print('chunkVCF: '+str(start_chunkVCF)+'-'+str(end_chunkVCF))
                 flush_print('refVCF:   '+str(start_refVCF)+'-'+str(end_refVCF))
+            print(start_refVCF,'<', start_chunkVCF)
+            print(end_refVCF,'>', end_chunkVCF)
             # sanity check, shouldnt happen
             if start_refVCF < start_chunkVCF or end_refVCF > end_chunkVCF:
                 raise RuntimeError('start of refVCF lower than start of chunkVCF or end of refVCF higher than end of chunkVCF,, something wrong with SNP indexing')
