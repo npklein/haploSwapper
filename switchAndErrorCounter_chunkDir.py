@@ -4,19 +4,22 @@ import vcf
 import sys
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--testVCF", help="VCF file to test against reference", required = True)
+parser.add_argument("--chunkDir", help="Directory with all the chunked VCF files", required = True)
 parser.add_argument("--vcfReference", help="Reference VCF to check haplotypes with.", required = True)
 parser.add_argument("--linking_file", help="File that links DNA IDs of chunk VCF and refVCF (first column chunkVCF, second columns refVCF)", required=True)
 parser.add_argument("--samples_file", help="File with IDs from chunkVCF that should be included",required = True)
 parser.add_argument("--out_file", help="File to write output to. Will write switching and genotype error out",required = True)
 parser.add_argument("--chr", help="Chromosome to calculate over", required = True)
+parser.add_argument("--debug", help="Print some extra info", required = False, action='store_true')
 args = parser.parse_args()
 
 def flush_print(message):
     print(message)
     sys.stdout.flush()
 
-flush_print('testVCF: '+args.testVCF)
+flush_print('NOTE!!! This gets sample name from VCF file names, e.g. only works if you have the SAME naming scheme')
+flush_print('<anything except phASER.>phASER.<sampleName>.chr<anything except .chr>.vcf.gz')
+flush_print('chunkDir: '+args.chunkDir)
 flush_print('vcfReference: '+args.vcfReference)
 flush_print('chr: '+args.chr)
 
@@ -68,6 +71,7 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
         ref = str(record.REF[0])
         alt = str(record.ALT[0])
         if len(ref) > 1 or len(alt) > 1:
+           if args.debug:
               flush_print('Skipping '+str(record.CHROM)+':'+str(record.POS)+' because it is not a bi-allelic SNP')
               continue
         # saving start and end so that for the ref VCF tabix indexing can be used to grab the same chunk as for the chunk VCF
@@ -107,30 +111,76 @@ def construct_haplotype(vcf_file, chr, start=None, stop=None, sample_to_use = No
 
 
 # chunk files are in args.chunkDir/<CHUNK>/vcf_per_sample
+flush_print('start looking for directory called vcf_per_sample')
+found_dir = False
 out =  open(args.out_file,'w')
-out.write('chunk'+'\t'+'sample'+'\t'+'overlapping_snps'+'\t'+'snps_only_chunkVCF'+'\t'+'snps_only_refVCF'+'\t'+'switch'+'\t') 
-out.write('no switch'+'\t'+'switchSnps'+'\t'+'noSwitchSnps'+'\t'+'totalHetsChunk'+'\t'+'totalHetsRef'+'\t'+
-out.write('chunkVCF hom alt TO refVCF hom ref'+'\t'+'chunkVCF hom ref - refVCF hom alt'+'\t')
-out.write('chunkVCF hom - refVCF het'+'\t'+'chunkVCF het - refVCF hom'+'\t')
-out.write('chunkVCF het - refVCF het'+'\t'+'chunkVCF hom alt TO refVCF hom ref SNPs'+'\t')
-out.write('chunkVCF hom ref - refVCF hom alt SNPs'+'\t')+'chunkVCF hom - refVCF het SNPs'+'\t')
-out.write('chunkVCF het - refVCF hom SNPs'+'\t'+'chunkVCF het - refVCF het SNPs'+'\t')
-out.write('totalError'+'\t'+'haploSize\n')
+out.write('chunk'+'\t')
+out.write('sample'+'\t')
+out.write('overlapping_snps'+'\t')
+out.write('snps_only_chunkVCF'+'\t')
+out.write('snps_only_refVCF'+'\t')
+out.write('switch'+'\t') 
+out.write('no switch'+'\t') 
+out.write('switchSnps'+'\t')
+out.write('noSwitchSnps'+'\t')
+out.write('totalHetsChunk'+'\t')
+out.write('totalHetsRef'+'\t')
+out.write('chunkVCF hom alt TO refVCF hom ref'+'\t')
+out.write('chunkVCF hom ref - refVCF hom alt'+'\t')
+out.write('chunkVCF hom - refVCF het'+'\t')
+out.write('chunkVCF het - refVCF hom'+'\t')
+out.write('chunkVCF het - refVCF het'+'\t')
+out.write('chunkVCF hom alt TO refVCF hom ref SNPs'+'\t')
+out.write('chunkVCF hom ref - refVCF hom alt SNPs'+'\t')
+out.write('chunkVCF hom - refVCF het SNPs'+'\t')
+out.write('chunkVCF het - refVCF hom SNPs'+'\t')
+out.write('chunkVCF het - refVCF het SNPs'+'\t')
+out.write('totalError'+'\t')
+out.write('haploSize')
 
 sample_snp_errors = {}
+# walk through all <CHUNK> dirs and get the VCF files
 number_of_overlapping_snp_positions = 0
-switch_count = 0
-not_switch_count = 0
-genotype_error_count = {'total':0,
-                        'chunkVCF hom alt - refVCF hom ref':0,  # AA TT
-                        'chunkVCF hom ref - refVCF hom alt':0,  # TT AA
-                        'chunkVCF hom - refVCF het':0,          # AA AT or AA TA or TT AT or TT AT
-                        'chunkVCF het - refVCF hom':0,          # AT AA or TA AA or TA TT or AT TT
-                        'chunkVCF het - refVCF het':0}           # AT CG (both het both different)
-total_count = 0
-
-haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, end_chunkVCF, sampleChunkVCF, recordInfoChunk  = construct_haplotype(os.path.join(root, file), args.chr, silent=True)
-
+for root, dirs, files in os.walk(args.chunkDir):
+    # add / because also have vcf_per_sample_<some other name>, this way can split on /
+    root = root+'/'
+    if not '/vcf_per_sample/' in root:
+        continue
+    found_dir = True
+    flush_print('Starting processing '+root)
+    total_files = len(files)
+    x = 0  
+    y = 0
+    for file in files:
+        x += 1
+        if file.endswith(".vcf.gz"):
+            y += 1
+            chunk = '.'.join(file.split('.chr')[1].split('.')[1:3])
+            switch_count = 0
+            not_switch_count = 0
+            genotype_error_count = {'total':0,
+                                    'chunkVCF hom alt - refVCF hom ref':0,  # AA TT
+                                    'chunkVCF hom ref - refVCF hom alt':0,  # TT AA
+                                    'chunkVCF hom - refVCF het':0,          # AA AT or AA TA or TT AT or TT AT
+                                    'chunkVCF het - refVCF hom':0,          # AT AA or TA AA or TA TT or AT TT
+                                    'chunkVCF het - refVCF het':0}           # AT CG (both het both different)
+            total_count = 0
+            # this is specific for the filename
+            file_sample_name = file.split('phASER.')[1].split('.chr')[0]
+            if not file_sample_name in samples_to_include:
+                continue
+            if x % 10 == 0:
+                flush_print(str(x)+'/'+str(total_files))
+            if args.debug:
+                flush_print('starting phaser vcf')
+            haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, end_chunkVCF, sampleChunkVCF, recordInfoChunk  = construct_haplotype(os.path.join(root, file), args.chr, silent=True)
+            if not end_chunkVCF:
+                flush_print('no records for chunk '+chunk+' in '+os.path.join(root,file))
+                continue
+            if sampleChunkVCF != file_sample_name:
+                raise RuntimeError('Returned results from wrong sample, should have been '+file_sample_name+', was '+sampleChunkVCF)
+            if args.debug:
+                flush_print('starting ref VCF')
             # do start_chunkVCF-1 because pyVCF indexing starts at 0 while VCF indexing start at 1
             # and do end_chunkVCF + 1 because it is closed indexed
             haplotypeA_refVCF, haplotypeB_refVCF, genotypes_refVCF, start_refVCF, end_refVCF, sampleRefVCF, recordInfoRef = construct_haplotype(os.path.join(root, args.vcfReference),
@@ -145,6 +195,9 @@ haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, en
             if not end_refVCF:
                 flush_print('no records in chunk '+args.chr+':'+str(start_chunkVCF-1)+'-'+str(end_chunkVCF)+' for '+os.path.join(root, args.vcfReference))
                 continue
+            if args.debug:
+                flush_print('chunkVCF: '+str(start_chunkVCF)+'-'+str(end_chunkVCF))
+                flush_print('refVCF:   '+str(start_refVCF)+'-'+str(end_refVCF))
             # sanity check, shouldnt happen
             if start_refVCF < start_chunkVCF or end_refVCF > end_chunkVCF:
                 raise RuntimeError('start of refVCF lower than start of chunkVCF or end of refVCF higher than end of chunkVCF,, something wrong with SNP indexing')
@@ -251,7 +304,7 @@ haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, en
 
                 # if it is not one of the first then they are both hom ref or both hom alt
                 total_count += 1
-            out.write(chunk+'\t'+'chr'+args.chr+'.'+file_sample_name+'\t'+','.join(overlapping_snp_positions_names)+'\t'+','.join(snps_only_chunkVCF_names)+
+            out.write('\n'+chunk+'\t'+'chr'+args.chr+'.'+file_sample_name+'\t'+','.join(overlapping_snp_positions_names)+'\t'+','.join(snps_only_chunkVCF_names)+
                       '\t'+','.join(snps_only_refVCF_names)+'\t'+
                         str(switch_count)+'\t'+str(not_switch_count)+'\t'+
                       ','.join(switch_snps)+'\t'+','.join(no_switch_snps)+'\t'+str(totalHetsChunk)+'\t'+str(totalHetsRef)+'\t'+
@@ -260,7 +313,7 @@ haplotypeA_chunkVCF, haplotypeB_chunkVCF, genotypes_chunkVCF, start_chunkVCF, en
                       str(genotype_error_count['chunkVCF het - refVCF het'])+'\t'+
                       ','.join(chunkVCF_homAlt__refVCF_homRef)+'\t'+','.join(chunkVCF_homRef__refVCF_homAlt)+'\t'+','.join(chunkVCF_hom__refVCF_het)+
                       '\t'+','.join(chunkVCF_het__refVCF_hom)+'\t'+','.join(chunkVCF_het__refVCF_het)+
-                      '\t'+str(genotype_error_count['total'])+'\t'+str(total_count)+'\n')
+                      '\t'+str(genotype_error_count['total'])+'\t'+str(total_count))
 out.close()
 
 if y == 0:
