@@ -2,6 +2,7 @@ import argparse;
 import os
 import vcf
 import sys
+import pandas as pd
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--chunkDir", help="Directory with all the chunked VCF files", required = True)
