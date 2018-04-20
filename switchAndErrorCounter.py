@@ -41,26 +41,46 @@ with open(args.samples_file) as input_file:
         samples_to_include_refVCF.add(sample_link[sample])
 
 gtf_info_genes = []
-gtf_info_all = []
 genes_start_stop = {}
 print('parse gtf')
+prev_start = 0
+prev_stop = 0
+prev_gene = ''
+prev_type = ''
+prev_feature = ''
 with open(args.gtf) as input_file:
     for line in input_file:
         if line.startswith('#') or line.split('\t')[0] != args.chr:
             continue
         line = line.strip().split('\t')
-        type  = line[1]
+        type  = [line[1]]
         start = int(line[3])
         stop = int(line[4])
         gene = line[8].split('gene_id "')[1].split('"')[0]
-        feature = line[2]
-        if feature == 'gene':
+        feature = [line[2]]
+        if feature[0] == 'gene':
+            if start < prev_start:
+                raise RuntimeError('should be sorted on start position')
+            if start < prev_stop:
+                # they should be merged
+                gene = prev_gene+';'+gene
+                if prev_stop > stop:
+                    stop = prev_stop
+                start = prev_start
+                gtf_info_genes = gtf_info_genes[:-1]
+                type.extend(prev_type)
+                feature.extend(prev_feature)
             gtf_info_genes.append([start, stop, gene, type, feature])
+            prev_start = start
+            prev_stop = stop
+            prev_gene = gene
+            prev_type = type
+            prev_feature = feature
             if gene in genes_start_stop:
                 raise RuntimeError("Shouldn't have multiple times same gene when filtering feature on gene") 
             genes_start_stop[gene] = [start,stop]
-        gtf_info_all.append([start, stop, gene, type, feature])
-        
+
+print(len(gtf_info_genes))
 
 def retrieve_haplotype_info(vcf_file, chr, samples_to_use, start=None, stop=None):
     '''Retrieve which haplotype each SNP is on
@@ -82,8 +102,6 @@ def retrieve_haplotype_info(vcf_file, chr, samples_to_use, start=None, stop=None
     for record in records:
         if x%100 == 0:
             flush_print(str(x)+' records processed');
-            if x == 500:
-                break
         x +=1
         # if filter = PASS: record.FILTER = [], otherwise e.g. record.FILTER = ['INACCESSIBLE']
         # so continue if record.FILTER contains value
@@ -100,17 +118,21 @@ def retrieve_haplotype_info(vcf_file, chr, samples_to_use, start=None, stop=None
             # check if current sample is one of interest
             if sample not in samples_to_use:
                 continue
+
             if record.POS not in hap_info:
                 hap_info[record.POS] = {}
                 genotypes[record.POS] = {}
                 ref_and_alt_allele_per_postion[record.POS] = {'refAllele':ref, 'altAllele':alt}
             sample_included_count += 1
-            if sample_included_count == len(samples_to_use):
+            if sample_included_count > len(samples_to_use):
                 # the rest of the samples in this line are not interesting, so break
                 break
 
             genotype = record.genotype(sample)
             genotypes[record.POS][sample] = genotype
+            if record.POS == 211633 and sample == 'gonl-96b':
+                print(sample)
+                # gonl-96b
             if genotype['GT'] == '0|0':
                 hap_info[record.POS][sample] = {'hapA':ref, 'hapB':ref}
             elif genotype['GT'] == '1|1':
@@ -178,19 +200,19 @@ for gene in haplotype_per_gene_testVCF:
                                                        'overlapping_snp_positions':[],
                                                        'hom_shouldBe_het':0}
         refSample = sample_link[sample]
-        if refSample == 'gonl-96b':
-            print(sample)
-            exit()
         for pos in haplotype_per_gene_testVCF[gene][sample]:           
             if pos not in ref_and_alt_allele_per_postion_refVCF:
+                switch_and_error_per_gene[gene][sample]['snps_only_testVCF'] += 1
                 continue
             if ref_and_alt_allele_per_postion_testVCF[pos] != ref_and_alt_allele_per_postion_refVCF[pos]:
-                switch_and_error_per_gene[gene][sample]['snps_only_testVCF'] += 1
-                raise RuntimeError('ref and alt not same between WGS and RNAseq genotypes')
+                # ref and alt not same between WGS and RNAseq genotypes, switch haps
+                haplotype_refVCF[pos][refSample]['hapA'], haplotype_refVCF[pos][refSample]['hapB'] = haplotype_refVCF[pos][refSample]['hapB'], haplotype_refVCF[pos][refSample]['hapA']
+                
             switch_and_error_per_gene[gene][sample]['overlapping_snps'] += 1
             
             hapA_testVCF = haplotype_per_gene_testVCF[gene][sample][pos]['hapA']
             hapB_testVCF = haplotype_per_gene_testVCF[gene][sample][pos]['hapB']
+
             hapA_refVCF = haplotype_refVCF[pos][refSample]['hapA']
             hapB_refVCF = haplotype_refVCF[pos][refSample]['hapB']
             switch_and_error_per_gene[gene][sample]['overlapping_snp_positions'].append(pos)
@@ -237,21 +259,21 @@ for gene in haplotype_per_gene_testVCF:
             if switch_and_error_per_gene[gene][sample]['switch'] > switch_and_error_per_gene[gene][sample]['no_switch']:
                 switch_and_error_per_gene[gene][sample]['switch'], switch_and_error_per_gene[gene][sample]['no_switch'] = switch_and_error_per_gene[gene][sample]['no_switch'], switch_and_error_per_gene[gene][sample]['switch']
             
-    print(switch_and_error_per_gene)
-    exit()
 
-
-
-
-out =  open(args.out_file,'w')
-columns_to_write = ['test','sample','overlapping_snps','snps_only_testVCF','snps_only_refVCF',
-                    'switch','no switch','switchSnps','noSwitchSnps','totalHetstest','totalHetsRef',
-                    'testVCF hom alt TO refVCF hom ref','testVCF hom ref - refVCF hom alt',
-                    'testVCF hom - refVCF het','testVCF het - refVCF hom','testVCF het - refVCF het',
-                    'testVCF hom alt TO refVCF hom ref SNPs','testVCF hom ref - refVCF hom alt SNPs',
-                    'testVCF hom - refVCF het SNPs','testVCF het - refVCF hom SNPs','testVCF het - refVCF het SNPs',
-                    'totalError']
-for column in columns_to_write:
-    out.write(column+'\t')
-out.write('haploSize\n')
-
+with open(args.out_file,'w') as out:
+    out.write('gene\tsample\toverlapping_snps\t\tsnps_only_testVCF\t')
+    out.write('switch\tno_switch\ttotalError\twrongHom\thet_shouldBe_hom\twrongHet\t')
+    out.write('hom_shouldBe_het\toverlapping_snp_positions\n')
+    for gene in switch_and_error_per_gene:
+        for sample in switch_and_error_per_gene[gene]:
+            data = switch_and_error_per_gene[gene][sample]
+            out.write(gene+'\t'+sample+'\t'+str(data['overlapping_snps'])+'\t')
+            out.write(str(data['snps_only_testVCF'])+'\t'+str(data['switch'])+'\t'+str(data['no_switch'])+'\t')
+            out.write(str(data['totalError'])+'\t'+str(data['wrongHom'])+'\t'+str(data['het_shouldBe_hom'])+'\t')
+            out.write(str(data['wrongHet'])+'\t'+str(data['hom_shouldBe_het']))
+            out.write('\t'+','.join(data['overlapping_snp_positions'])+'\n')
+            
+            
+            
+            
+            
