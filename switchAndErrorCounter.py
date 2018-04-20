@@ -215,7 +215,7 @@ for gene in haplotype_per_gene_testVCF:
 
             hapA_refVCF = haplotype_refVCF[pos][refSample]['hapA']
             hapB_refVCF = haplotype_refVCF[pos][refSample]['hapB']
-            switch_and_error_per_gene[gene][sample]['overlapping_snp_positions'].append(pos)
+            switch_and_error_per_gene[gene][sample]['overlapping_snp_positions'].append(str(pos))
             
             if hapA_testVCF != hapB_testVCF:
                 # testVCF is HET
@@ -261,7 +261,7 @@ for gene in haplotype_per_gene_testVCF:
             
 
 with open(args.out_file,'w') as out:
-    out.write('gene\tsample\toverlapping_snps\t\tsnps_only_testVCF\t')
+    out.write('gene\tsample\toverlapping_snps\tsnps_only_testVCF\t')
     out.write('switch\tno_switch\ttotalError\twrongHom\thet_shouldBe_hom\twrongHet\t')
     out.write('hom_shouldBe_het\toverlapping_snp_positions\n')
     for gene in switch_and_error_per_gene:
