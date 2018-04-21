@@ -228,10 +228,10 @@ for gene in haplotype_per_gene_testVCF:
                             switch_and_error_per_gene[gene][sample]['no_switch'] += 1
                         else:
                             # hapA is the same but hapB is different, so different het is called
-                            witch_and_error_per_gene[gene][sample]['wrongHet'] += 1
+                            switch_and_error_per_gene[gene][sample]['wrongHet'] += 1
                     elif hapA_testVCF != hapB_refVCF:
                         # hapA of testVCF is different than hapA and hapB of refVCF, wrong het called
-                        witch_and_error_per_gene[gene][sample]['wrongHet'] += 1
+                        switch_and_error_per_gene[gene][sample]['wrongHet'] += 1
                     else:
                         assert hapA_testVCF == hapB_refVCF and hapB_testVCF == hapA_refVCF
                         # switch error
