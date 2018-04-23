@@ -261,13 +261,13 @@ for gene in haplotype_per_gene_testVCF:
             
 
 with open(args.out_file,'w') as out:
-    out.write('gene\tsample\toverlapping_snps\tsnps_only_testVCF\t')
+    out.write('chr\tgene\tsample\toverlapping_snps\tsnps_only_testVCF\t')
     out.write('switch\tno_switch\ttotalError\twrongHom\thet_shouldBe_hom\twrongHet\t')
     out.write('hom_shouldBe_het\toverlapping_snp_positions\n')
     for gene in switch_and_error_per_gene:
         for sample in switch_and_error_per_gene[gene]:
             data = switch_and_error_per_gene[gene][sample]
-            out.write(gene+'\t'+sample+'\t'+str(data['overlapping_snps'])+'\t')
+            out.write(args.chr+'\t'+gene+'\t'+sample+'\t'+str(data['overlapping_snps'])+'\t')
             out.write(str(data['snps_only_testVCF'])+'\t'+str(data['switch'])+'\t'+str(data['no_switch'])+'\t')
             out.write(str(data['totalError'])+'\t'+str(data['wrongHom'])+'\t'+str(data['het_shouldBe_hom'])+'\t')
             out.write(str(data['wrongHet'])+'\t'+str(data['hom_shouldBe_het']))
