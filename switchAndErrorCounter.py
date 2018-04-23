@@ -4,7 +4,6 @@ import vcf
 import sys
 from bisect import bisect
 import pandas as pd 
-
 parser = argparse.ArgumentParser()
 parser.add_argument("--testVCF", help="VCF file to test against reference", required = True)
 parser.add_argument("--vcfReference", help="Reference VCF to check haplotypes with.", required = True)
