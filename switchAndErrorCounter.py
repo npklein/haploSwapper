@@ -12,6 +12,7 @@ parser.add_argument("--samples_file", help="File with IDs from testVCF that shou
 parser.add_argument("--out_file", help="File to write output to. Will write switching and genotype error out",required = True)
 parser.add_argument("--chr", help="Chromosome to calculate over", required = True)
 parser.add_argument("--gtf", help="Gtf file with gene coordinate information", required = True)
+parser.add_argument("--gene_list", help="File with list of genes to include", required = False)
 args = parser.parse_args()
 
 
@@ -39,6 +40,11 @@ with open(args.samples_file) as input_file:
         samples_to_include_testVCF.add(sample)
         samples_to_include_refVCF.add(sample_link[sample])
 
+gene_list = None
+if args.gene_list:
+    with open(args.gene_list) as input_file:
+        gene_list = input_file.read().split('\n')
+
 gtf_info_genes = []
 genes_start_stop = {}
 print('parse gtf')
@@ -56,6 +62,8 @@ with open(args.gtf) as input_file:
         start = int(line[3])
         stop = int(line[4])
         gene = line[8].split('gene_id "')[1].split('"')[0]
+        if gene_list and gene not in gene_list:
+            continue
         feature = [line[2]]
         if feature[0] == 'gene':
             if start < prev_start:
@@ -78,7 +86,7 @@ with open(args.gtf) as input_file:
             if gene in genes_start_stop:
                 raise RuntimeError("Shouldn't have multiple times same gene when filtering feature on gene") 
             genes_start_stop[gene] = [start,stop]
-
+            
 def retrieve_haplotype_info(vcf_file, chr, samples_to_use, start=None, stop=None):
     '''Retrieve which haplotype each SNP is on
     
